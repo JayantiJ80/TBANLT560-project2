@@ -1,0 +1,192 @@
+---
+title: "Project 2- Health-BreastCancer Classification & Prediction"
+author: "Jayanti Jain"
+date: "2023-03-13"
+output:
+  word_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+```{r}
+library(mlbench)   #Package with dataset- BreastCancer
+library(tidyverse) #Package for string function
+library(caTools)   #Package for splitting the dataset into training and test data
+library(caret)     #Package for functions for training and plotting models
+library(mice)      #Package for function to remove NA value in dataset
+library(e1071)     #Package for function to implement naiveBayes classification algorithm
+library(rpart)     #Package for function to implement tree algorithm
+library(randomForest) #Package for function to implement Random Forest Algorithm
+library(rpart.plot)   #Package for plotting 
+library(nnet)    #Package to implement NN classifiers
+```
+
+```{r}
+#loading & exploring
+#package with breastcancer dataset
+require(mlbench) 
+#loading the dataset
+data("BreastCancer") 
+#Structure of the dataset
+str(BreastCancer) 
+#Finding the levels of target class
+levels(BreastCancer$Class)
+#Summary of Dataset
+summary(BreastCancer)
+# class of each variables
+sapply(BreastCancer, function(x) class(x)[1])
+```
+```{r}
+#Cleaning the data
+#Removing NA values and ID(1st column) from dataset using library mice
+dataset_impute <- mice(BreastCancer[,2:10],  print = FALSE) 
+#Adding Target class to the imputed dataset without NA
+BreastCancer <- cbind(BreastCancer[,11, drop = FALSE], mice::complete(dataset_impute, 1))
+#Summary of the cleaned Dataset
+summary(BreastCancer) 
+
+```
+
+```{r}
+# Create 70% training and 30% validation data
+
+set.seed(120)    
+# Splitting data into training and test dataset
+split=sample.split(BreastCancer, SplitRatio = 0.7)
+# Training dataset
+training_set=subset(BreastCancer,split==TRUE)
+# Test dataset
+test_set=subset(BreastCancer,split==FALSE)  
+# Dimenstions of training dataset
+dim(training_set)     
+# Dimesnions of test dataset
+dim(test_set)
+ # Removing target class
+topredict_set<-test_set[2:10]                       
+dim(topredict_set)
+
+```
+```{r}
+#Naive Bayes Classification
+#Implementing NaiveBayes 
+model_naive<- naiveBayes(Class ~ ., data = training_set)  
+#Predicting target class for the Validation set
+preds_naive <- predict(model_naive, newdata = topredict_set)  
+(conf_matrix_naive <- table(preds_naive, test_set$Class))       
+#Confusion matrix for finding Accuracy of the model
+confusionMatrix(conf_matrix_naive)                  
+```
+```{r}
+#Randomforest classifier
+# Implementing RandomForest
+model_rf <- randomForest(Class ~ ., data = training_set, importance=TRUE, ntree = 5) 
+#Predicting target class for the Validation set
+preds_rf <- predict(model_rf, topredict_set)              
+(conf_matrix_forest <- table(preds_rf, test_set$Class))
+#Confusion matrix for finding Accuracy of the model
+confusionMatrix(conf_matrix_forest)                       
+
+```
+```{r}
+#Decision tree
+#Implementing Decision Tree
+model_dtree<- rpart(Class ~ ., data=training_set)      
+#Predicting target class for the Validation set
+preds_dtree <- predict(model_dtree,newdata=topredict_set, type = "class")
+(conf_matrix_dtree <- table(preds_dtree, test_set$Class))
+# plot tree
+prp(model_dtree, type = 1, extra = 1, under = TRUE, split.font = 1, varlen = -10)
+
+plot(preds_dtree, main="Decision tree created using rpart")
+#plot(model_dtree, main="Decision tree created using rpart")
+
+#Confusion matrix for finding Accuracy of the model
+confusionMatrix(conf_matrix_dtree)                     
+
+
+```
+```{r}
+#Neuralnet classifier
+#Implementing Nnet Classifier
+nn_ntree<- nnet(Class ~ ., data=training_set, size=1)      
+#Predicting target class for the Validation set
+preds_ntree <- predict(nn_ntree,newdata=topredict_set, type = "class")
+(conf_matrix_ntree <- table(preds_ntree, test_set$Class))
+#Confusion matrix for finding Accuracy of the model
+confusionMatrix(conf_matrix_ntree)                     
+
+```
+```{r}
+# create model using conditional inference trees
+
+require(party)
+model_ct <- ctree(Class ~ ., data=training_set)
+x.ct.pred <- predict(model_ct, newdata=topredict_set)
+x.ct.prob <-  1- unlist(treeresponse(model_ct, topredict_set), use.names=F)[seq(1,nrow(topredict_set)*2,2)]
+(conf_matrix_ct <- table(x.ct.pred, test_set$Class))
+#Confusion matrix for finding Accuracy of the model
+confusionMatrix(conf_matrix_ct)                     
+
+# To view the decision tree, uncomment this line.
+plot(model_ct, main="Decision tree created using condition inference trees")
+ 
+```
+```{r}
+
+```
+
+
+
+```{r}
+## create model using svm (support vector machine)
+
+require(e1071)
+
+# svm requires tuning
+x.svm.tune <- tune(svm, Class~., data = training_set,
+                   ranges = list(gamma = 2^(-8:1), cost = 2^(0:4)),
+                   tunecontrol = tune.control(sampling = "fix"))
+# display the tuning results (in text format)
+x.svm.tune
+# If the tuning results are on the margin of the parameters (e.g., gamma = 2^-8), 
+# then widen the parameters.
+# I manually copied the cost and gamma from console messages above to parameters below.
+x.svm <- svm(Class~., data = training_set, cost=4, gamma=0.0625, probability = TRUE)
+x.svm.prob <- predict(x.svm, type="prob", newdata=topredict_set, probability = TRUE)
+(conf_matrix_svm <- table(x.svm.prob, test_set$Class))
+#Confusion matrix for finding Accuracy of the model
+confusionMatrix(conf_matrix_svm)                     
+
+```
+
+```{r}
+#combining classifiers
+
+combine.classes<-data.frame(preds_rf,preds_dtree,preds_ntree,x.svm.prob, x.ct.pred, preds_naive)
+head(combine.classes)
+head(preds_rf)
+#head(myrda.pred)
+combine.classes$preds_rf<-ifelse(combine.classes$preds_rf=="benign", 0, 1)
+combine.classes[,2]<-ifelse(combine.classes[,2]=="benign", 0, 1)
+combine.classes[,3]<-ifelse(combine.classes[,3]=="benign", 0, 1)
+combine.classes[,4]<-ifelse(combine.classes[,4]=="benign", 0, 1)
+combine.classes[,5]<-ifelse(combine.classes[,5]=="benign", 0, 1)
+combine.classes[,6]<-ifelse(combine.classes[,6]=="benign", 0, 1)
+str(combine.classes)
+combine.cl<-combine.classes[, -c(7,8)]
+majority.vote=rowSums(combine.classes[,-c(7,8)])
+head(majority.vote)
+#combine.classes[,7]<-rowSums(combine.classes[,-c(7,8)])
+# Subset the BreastCancer data frame to only include the rows corresponding to the combine.classes data frame
+breast_cancer_subset <- BreastCancer[1:nrow(combine.classes),]
+
+combine.classes[,6]<-ifelse(combine.classes[,6]>=4, "malignant", "benign")
+table(combine.classes[,6], breast_cancer_subset$Class)
+
+#table(combine.classes[,6], BreastCancer$Class)
+
+
+```
+
